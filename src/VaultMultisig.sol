@@ -117,7 +117,7 @@ contract VaultMultisig {
         Transfer storage transfer = transfers[transferId];
         transfer.to = _to;
         transfer.amount = _amount;
-        transfer.approvals = 0;
+        transfer.approvals = 1;
         transfer.executed = false;
         transfer.approved[msg.sender] = true;
 
