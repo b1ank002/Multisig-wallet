@@ -120,15 +120,15 @@ contract VaultMultisigERC20 {
     /// @notice Initialize a transfer
     /// @param _to The address of the recipient
     /// @param _amount The amount of tokens to transfer
-    function initializeTransfer(address _to, uint256 _amount) onlyMultiSigner external {
-        if(_to == address(0)) revert InvalideReceipient();
-        if(_amount == 0) revert InvalidAmount();
+    function initializeTransfer(address _to, uint256 _amount) external onlyMultiSigner {
+        if (_to == address(0)) revert InvalideReceipient();
+        if (_amount == 0) revert InvalidAmount();
 
         uint256 transferId = transfersCount++;
         Transfer storage transfer = transfers[transferId];
         transfer.to = _to;
         transfer.amount = _amount;
-        transfer.approvals = 1;
+        transfer.approvals++;
         transfer.executed = false;
         transfer.approved[msg.sender] = true;
 
@@ -137,7 +137,7 @@ contract VaultMultisigERC20 {
 
     /// @notice Approve a transfer
     /// @param transferId The ID of the transfer
-    function approveTransfer(uint256 transferId) onlyMultiSigner external {
+    function approveTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
         if (transfer.approved[msg.sender]) revert SignerAlreadyApproved(msg.sender);
@@ -151,7 +151,7 @@ contract VaultMultisigERC20 {
     /// @notice Execute a transfer
     /// @param transferId The ID of the transfer
     /// @dev The tokens MUST be on the contract
-    function executeTransfer(uint256 transferId) onlyMultiSigner external {
+    function executeTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
         if (transfer.approvals < quorum) revert QuaromNotReached(transferId);
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
@@ -167,12 +167,12 @@ contract VaultMultisigERC20 {
 
     /// @notice Get the details of a transfer
     /// @param transferId The ID of the transfer
-    function getTransfer(uint256 transferId) onlyMultiSigner external view returns (
-        address to,
-        uint256 amount,
-        uint256 approvals,
-        bool executed
-    ) {
+    function getTransfer(uint256 transferId)
+        external
+        view
+        onlyMultiSigner
+        returns (address to, uint256 amount, uint256 approvals, bool executed)
+    {
         Transfer storage transfer = transfers[transferId];
         return (transfer.to, transfer.amount, transfer.approvals, transfer.executed);
     }
@@ -180,7 +180,7 @@ contract VaultMultisigERC20 {
     /// @notice Check if a signer has approved a transfer
     /// @param transferId The ID of the transfer
     /// @param signer The address of the signer
-    function isApproved(uint256 transferId, address signer) onlyMultiSigner external view returns (bool) {
+    function isApproved(uint256 transferId, address signer) external view onlyMultiSigner returns (bool) {
         Transfer storage transfer = transfers[transferId];
         return transfer.approved[signer];
     }

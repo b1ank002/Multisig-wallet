@@ -2,7 +2,6 @@
 pragma solidity ^0.8.30;
 
 contract VaultMultisig {
-
     /// @notice The number of signatures required to execute a transaction
     uint256 public quorum;
 
@@ -109,15 +108,15 @@ contract VaultMultisig {
     /// @notice Initialize a transfer
     /// @param _to The address of the recipient
     /// @param _amount The amount of tokens to transfer
-    function InitializeTransfer(address _to, uint256 _amount) onlyMultiSigner external {
-        if(_to == address(0)) revert InvalideReceipient();
-        if(_amount == 0) revert InvalidAmount();
+    function InitializeTransfer(address _to, uint256 _amount) external onlyMultiSigner {
+        if (_to == address(0)) revert InvalideReceipient();
+        if (_amount == 0) revert InvalidAmount();
 
         uint256 transferId = transfersCount++;
         Transfer storage transfer = transfers[transferId];
         transfer.to = _to;
         transfer.amount = _amount;
-        transfer.approvals = 0;
+        transfer.approvals++;
         transfer.executed = false;
         transfer.approved[msg.sender] = true;
 
@@ -127,7 +126,7 @@ contract VaultMultisig {
     /// @notice Approve a transfer
     /// @param transferId The ID of the transfer
     /// @dev Must return true
-    function approveTransfer(uint256 transferId) onlyMultiSigner external {
+    function approveTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
         if (transfer.approved[msg.sender]) revert SignerAlreadyApproved(msg.sender);
@@ -138,7 +137,7 @@ contract VaultMultisig {
         emit TransferApproved(transferId, msg.sender);
     }
 
-    function executeTransfer(uint256 transferId) onlyMultiSigner external {
+    function executeTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
         if (transfer.approvals < quorum) revert QuaromNotReached(transferId);
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
@@ -146,7 +145,7 @@ contract VaultMultisig {
         uint256 balance = address(this).balance;
         if (transfer.amount > balance) revert InsufficientBalance();
 
-        (bool success, ) = transfer.to.call{value: transfer.amount}("");
+        (bool success,) = transfer.to.call{value: transfer.amount}("");
         if (!success) revert TransferFailed(transferId);
 
         transfer.executed = true;
@@ -156,12 +155,12 @@ contract VaultMultisig {
 
     /// @notice Get the details of a transfer
     /// @param transferId The ID of the transfer
-    function getTransfer(uint256 transferId) onlyMultiSigner external view returns (
-        address to,
-        uint256 amount,
-        uint256 approvals,
-        bool executed
-    ) {
+    function getTransfer(uint256 transferId)
+        external
+        view
+        onlyMultiSigner
+        returns (address to, uint256 amount, uint256 approvals, bool executed)
+    {
         Transfer storage transfer = transfers[transferId];
         return (transfer.to, transfer.amount, transfer.approvals, transfer.executed);
     }
@@ -169,7 +168,7 @@ contract VaultMultisig {
     /// @notice Check if a signer has approved a transfer
     /// @param transferId The ID of the transfer
     /// @param signer The address of the signer
-    function  hasSignetTransfer(uint256 transferId, address signer) external view returns (bool) {
+    function hasSignetTransfer(uint256 transferId, address signer) external view returns (bool) {
         Transfer storage transfer = transfers[transferId];
         return transfer.approved[signer];
     }
