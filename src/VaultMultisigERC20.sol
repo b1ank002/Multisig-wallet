@@ -1,7 +1,12 @@
-// SPDX-License-Identifier:MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-contract VaultMultisig {
+import "node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract VaultMultisigERC20 {
+    /// @notice Token contract
+    IERC20 public token;
+
     /// @notice The number of signatures required to execute a transaction
     uint256 public quorum;
 
@@ -28,44 +33,46 @@ contract VaultMultisig {
     /// @notice The mapping for verification that address is signer
     mapping(address => bool) public multiSigSigners;
 
-    /// @notice Checks if the array of signers is not empty
+    /// @notice Checks if  the token address is valid
+    error InvalidToken();
+
+    /// @notice Cheks if the array of signers is not empty
     error SingersArrayCantBeEmpty();
 
-    /// @notice The error is thrown when the quorum is greater than the number of signers
+    /// @notice Checks if the quorum is less than the number of signers
     error QuaromGreaterThanSigners();
 
-    /// @notice The error is thrown when the quorum is less than 1
+    /// @notice Checks if the quorum is more than one
     error QuaromLessThanOne();
 
-    /// @notice The error is thrown when the recipient is address(0)
+    /// @notice Checks if signer is multisig signer
+    /// @param signer The address of the signer
+    error InvalideMultisigSigner(address signer);
+
+    /// @notice Checks if the recipient is valid
     error InvalideReceipient();
 
-    /// @notice The error is thrown when the amount is 0
+    /// @notice Checks if the amount is valid
     error InvalidAmount();
 
-    /// @notice The error is thrown when the signer is not a multisig signer
-    error InvalideMultisigSigner();
-
-    /// @notice The error is thrown when the transfer is not found
-    error TransferNotFound(uint256 transferId);
-
-    /// @notice The error is thrown when the transfer is already executed
+    /// @notice Checks if the transfer is not executed
     /// @param transferId The ID of the transfer
     error TransferAlreadyExecuted(uint256 transferId);
 
-    /// @notice The error is thrown when the signer has already approved the transfer
+    /// @notice Checks if the signer has not approved the transfer
     /// @param signer The address of the signer
     error SignerAlreadyApproved(address signer);
 
-    /// @notice The error is thrown when the quorum is not reached
+    /// @notice Checks if the quorum is reached
     /// @param transferId The ID of the transfer
     error QuaromNotReached(uint256 transferId);
 
-    /// @notice The error is thrown when the balance is not enough
-    error InsufficientBalance();
-
-    /// @notice The error is thrown when the transfer fails
+    /// @notice Checks if the transfer is succeed
+    /// @param transferId The ID of the transfer
     error TransferFailed(uint256 transferId);
+
+    /// @notice Checks if the balance is enough
+    error InsufficientBalance();
 
     /// @notice The event is emitted when a transfer is initialized
     /// @param transferId The ID of the transfer
@@ -73,7 +80,7 @@ contract VaultMultisig {
     /// @param amount The amount of tokens to transfer
     event TransferInitialized(uint256 indexed transferId, address to, uint256 amount);
 
-    /// @notice The event is emitted when a signer approves a transfer
+    /// @notice The event is emitted when the signer approves the transfer
     /// @param transferId The ID of the transfer
     /// @param signer The address of the signer
     event TransferApproved(uint256 indexed transferId, address signer);
@@ -82,33 +89,38 @@ contract VaultMultisig {
     /// @param transferId The ID of the transfer
     event TransferExecuted(uint256 indexed transferId);
 
-    /// @notice The modifier is used to check if the signer is a multisig signer
-    modifier onlyMultiSigner() {
-        if (!multiSigSigners[msg.sender]) revert InvalideMultisigSigner();
-        _;
-    }
-
-    /// @notice The default fallback function fo receiving ETH
-    receive() external payable {}
-
-    /// @notice Initialize the multisig contract
-    /// @param _signers The array of multisig signers
+    /// @notice Initialize the multisig ERC20 contract
+    /// @param _token The address of the token contract
     /// @param _quorum The number of signatures required to execute a transaction
-    constructor(address[] memory _signers, uint256 _quorum) {
+    /// @param _signers The array of multisig signers
+    constructor(address _token, uint256 _quorum, address[] memory _signers) {
+        if (_token == address(0)) revert InvalidToken();
         if (_signers.length == 0) revert SingersArrayCantBeEmpty();
-        if (_quorum > _signers.length) revert QuaromGreaterThanSigners();
+        if (_quorum < _signers.length) revert QuaromGreaterThanSigners();
         if (_quorum == 0) revert QuaromLessThanOne();
 
-        for (uint256 i = 0; i < _signers.length; i++) {
+        for (uint256 i = 0; i < _signers.length;) {
             multiSigSigners[_signers[i]] = true;
+
+            unchecked {
+                ++i;
+            }
         }
+
+        token = IERC20(_token);
         quorum = _quorum;
+    }
+
+    /// @notice The modifier is used to check if the signer is a multisig signer
+    modifier onlyMultiSigner() {
+        if (!multiSigSigners[msg.sender]) revert InvalideMultisigSigner(msg.sender);
+        _;
     }
 
     /// @notice Initialize a transfer
     /// @param _to The address of the recipient
     /// @param _amount The amount of tokens to transfer
-    function InitializeTransfer(address _to, uint256 _amount) external onlyMultiSigner {
+    function initializeTransfer(address _to, uint256 _amount) external onlyMultiSigner {
         if (_to == address(0)) revert InvalideReceipient();
         if (_amount == 0) revert InvalidAmount();
 
@@ -125,7 +137,6 @@ contract VaultMultisig {
 
     /// @notice Approve a transfer
     /// @param transferId The ID of the transfer
-    /// @dev Must return true
     function approveTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
@@ -137,16 +148,17 @@ contract VaultMultisig {
         emit TransferApproved(transferId, msg.sender);
     }
 
+    /// @notice Execute a transfer
+    /// @param transferId The ID of the transfer
+    /// @dev The tokens MUST be on the contract
     function executeTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
         if (transfer.approvals < quorum) revert QuaromNotReached(transferId);
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
 
-        uint256 balance = address(this).balance;
+        uint256 balance = token.balanceOf(address(this));
         if (transfer.amount > balance) revert InsufficientBalance();
-
-        (bool success,) = transfer.to.call{value: transfer.amount}("");
-        if (!success) revert TransferFailed(transferId);
+        require(token.transfer(transfer.to, transfer.amount), TransferFailed(transferId));
 
         transfer.executed = true;
 
@@ -168,7 +180,7 @@ contract VaultMultisig {
     /// @notice Check if a signer has approved a transfer
     /// @param transferId The ID of the transfer
     /// @param signer The address of the signer
-    function hasSignetTransfer(uint256 transferId, address signer) external view returns (bool) {
+    function isApproved(uint256 transferId, address signer) external view onlyMultiSigner returns (bool) {
         Transfer storage transfer = transfers[transferId];
         return transfer.approved[signer];
     }
