@@ -5,6 +5,9 @@ contract VaultMultisig {
     /// @notice The number of signatures required to execute a transaction
     uint256 public quorum;
 
+    /// @notice The array of multisig signers
+    address[] public multiSigSignersArray;
+
     /// @notice The number of transfers executed
     uint256 public transfersCount;
 
@@ -32,22 +35,19 @@ contract VaultMultisig {
     error SingersArrayCantBeEmpty();
 
     /// @notice The error is thrown when the quorum is greater than the number of signers
-    error QuaromGreaterThanSigners();
+    error QuorumGreaterThanSigners();
 
     /// @notice The error is thrown when the quorum is less than 1
-    error QuaromLessThanOne();
+    error QuorumLessThanOne();
 
     /// @notice The error is thrown when the recipient is address(0)
-    error InvalideReceipient();
+    error InvalidReceipient();
 
     /// @notice The error is thrown when the amount is 0
     error InvalidAmount();
 
     /// @notice The error is thrown when the signer is not a multisig signer
-    error InvalideMultisigSigner();
-
-    /// @notice The error is thrown when the transfer is not found
-    error TransferNotFound(uint256 transferId);
+    error InvalidMultisigSigner();
 
     /// @notice The error is thrown when the transfer is already executed
     /// @param transferId The ID of the transfer
@@ -59,13 +59,17 @@ contract VaultMultisig {
 
     /// @notice The error is thrown when the quorum is not reached
     /// @param transferId The ID of the transfer
-    error QuaromNotReached(uint256 transferId);
+    error QuorumNotReached(uint256 transferId);
 
     /// @notice The error is thrown when the balance is not enough
     error InsufficientBalance();
 
     /// @notice The error is thrown when the transfer fails
     error TransferFailed(uint256 transferId);
+
+    /// @notice The error is thrown when the signer already exists
+    /// @param signer The address of the signer
+    error SignerAlreadyExists(address signer);
 
     /// @notice The event is emitted when a transfer is initialized
     /// @param transferId The ID of the transfer
@@ -82,41 +86,81 @@ contract VaultMultisig {
     /// @param transferId The ID of the transfer
     event TransferExecuted(uint256 indexed transferId);
 
+    /// @notice Emitted when the multisig signers are updated
+    event MultiSigSignersUpdated();
+
+    /// @notice Emitted when the quorum is updated
+    /// @param quorum The new quorum
+    event QuorumUpdated(uint256 quorum);
+
     /// @notice The modifier is used to check if the signer is a multisig signer
     modifier onlyMultiSigner() {
-        if (!multiSigSigners[msg.sender]) revert InvalideMultisigSigner();
+        if (!multiSigSigners[msg.sender]) revert InvalidMultisigSigner();
         _;
     }
-
-    /// @notice The default fallback function fo receiving ETH
-    receive() external payable {}
 
     /// @notice Initialize the multisig contract
     /// @param _signers The array of multisig signers
     /// @param _quorum The number of signatures required to execute a transaction
     constructor(address[] memory _signers, uint256 _quorum) {
         if (_signers.length == 0) revert SingersArrayCantBeEmpty();
-        if (_quorum > _signers.length) revert QuaromGreaterThanSigners();
-        if (_quorum == 0) revert QuaromLessThanOne();
+        if (_quorum > _signers.length) revert QuorumGreaterThanSigners();
+        if (_quorum == 0) revert QuorumLessThanOne();
 
         for (uint256 i = 0; i < _signers.length; i++) {
-            multiSigSigners[_signers[i]] = true;
+            address signer = _signers[i];
+            if (signer == address(0)) revert InvalidMultisigSigner();
+            if (multiSigSigners[signer]) revert SignerAlreadyExists(signer);
+            multiSigSigners[signer] = true;
         }
+
+        multiSigSignersArray = _signers;
         quorum = _quorum;
+    }
+
+    /// @notice The default fallback function fo receiving ETH
+    receive() external payable {}
+
+    /// @notice Updates the list of multisig signers and sets a new quorum
+    /// @dev Only callable by all current signers via consensus (i.e., must call from multisig itself)
+    /// @param newSigners The new array of signer addresses
+    /// @param newQuorum The new required quorum
+    function updateSignersAndQuorum(address[] calldata newSigners, uint256 newQuorum) external onlyMultiSigner {
+        if (newSigners.length == 0) revert SingersArrayCantBeEmpty();
+        if (newQuorum == 0) revert QuorumLessThanOne();
+        if (newQuorum > newSigners.length) revert QuorumGreaterThanSigners();
+
+        // Clear old signers
+        for (uint256 i = 0; i < multiSigSignersArray.length; i++) {
+            multiSigSigners[multiSigSignersArray[i]] = false;
+        }
+
+        // Set new signers
+        for (uint256 i = 0; i < newSigners.length; i++) {
+            address signer = newSigners[i];
+            require(signer != address(0), InvalidMultisigSigner());
+            if (multiSigSigners[signer]) revert SignerAlreadyExists(signer);
+            multiSigSigners[signer] = true;
+        }
+
+        multiSigSignersArray = newSigners;
+        quorum = newQuorum;
+        emit MultiSigSignersUpdated();
+        emit QuorumUpdated(newQuorum);
     }
 
     /// @notice Initialize a transfer
     /// @param _to The address of the recipient
     /// @param _amount The amount of tokens to transfer
     function InitializeTransfer(address _to, uint256 _amount) external onlyMultiSigner {
-        if (_to == address(0)) revert InvalideReceipient();
+        if (_to == address(0)) revert InvalidReceipient();
         if (_amount == 0) revert InvalidAmount();
 
         uint256 transferId = transfersCount++;
         Transfer storage transfer = transfers[transferId];
         transfer.to = _to;
         transfer.amount = _amount;
-        transfer.approvals++;
+        transfer.approvals = 1;
         transfer.executed = false;
         transfer.approved[msg.sender] = true;
 
@@ -139,7 +183,7 @@ contract VaultMultisig {
 
     function executeTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
-        if (transfer.approvals < quorum) revert QuaromNotReached(transferId);
+        if (transfer.approvals < quorum) revert QuorumNotReached(transferId);
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
 
         uint256 balance = address(this).balance;
@@ -158,7 +202,6 @@ contract VaultMultisig {
     function getTransfer(uint256 transferId)
         external
         view
-        onlyMultiSigner
         returns (address to, uint256 amount, uint256 approvals, bool executed)
     {
         Transfer storage transfer = transfers[transferId];
@@ -168,7 +211,7 @@ contract VaultMultisig {
     /// @notice Check if a signer has approved a transfer
     /// @param transferId The ID of the transfer
     /// @param signer The address of the signer
-    function hasSignetTransfer(uint256 transferId, address signer) external view returns (bool) {
+    function hasSignedTransfer(uint256 transferId, address signer) external view returns (bool) {
         Transfer storage transfer = transfers[transferId];
         return transfer.approved[signer];
     }

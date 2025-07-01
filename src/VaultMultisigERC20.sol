@@ -40,17 +40,17 @@ contract VaultMultisigERC20 {
     error SingersArrayCantBeEmpty();
 
     /// @notice Checks if the quorum is less than the number of signers
-    error QuaromGreaterThanSigners();
+    error QuorumGreaterThanSigners();
 
     /// @notice Checks if the quorum is more than one
-    error QuaromLessThanOne();
+    error QuorumLessThanOne();
 
     /// @notice Checks if signer is multisig signer
     /// @param signer The address of the signer
-    error InvalideMultisigSigner(address signer);
+    error InvalidMultisigSigner(address signer);
 
     /// @notice Checks if the recipient is valid
-    error InvalideReceipient();
+    error InvalidReceipient();
 
     /// @notice Checks if the amount is valid
     error InvalidAmount();
@@ -65,7 +65,7 @@ contract VaultMultisigERC20 {
 
     /// @notice Checks if the quorum is reached
     /// @param transferId The ID of the transfer
-    error QuaromNotReached(uint256 transferId);
+    error QuorumNotReached(uint256 transferId);
 
     /// @notice Checks if the transfer is succeed
     /// @param transferId The ID of the transfer
@@ -91,13 +91,13 @@ contract VaultMultisigERC20 {
 
     /// @notice Initialize the multisig ERC20 contract
     /// @param _token The address of the token contract
-    /// @param _quorum The number of signatures required to execute a transaction
     /// @param _signers The array of multisig signers
-    constructor(address _token, uint256 _quorum, address[] memory _signers) {
+    /// @param _quorum The number of signatures required to execute a transaction
+    constructor(address _token, address[] memory _signers, uint256 _quorum) {
         if (_token == address(0)) revert InvalidToken();
         if (_signers.length == 0) revert SingersArrayCantBeEmpty();
-        if (_quorum < _signers.length) revert QuaromGreaterThanSigners();
-        if (_quorum == 0) revert QuaromLessThanOne();
+        if (_quorum > _signers.length) revert QuorumGreaterThanSigners();
+        if (_quorum == 0) revert QuorumLessThanOne();
 
         for (uint256 i = 0; i < _signers.length;) {
             multiSigSigners[_signers[i]] = true;
@@ -113,7 +113,7 @@ contract VaultMultisigERC20 {
 
     /// @notice The modifier is used to check if the signer is a multisig signer
     modifier onlyMultiSigner() {
-        if (!multiSigSigners[msg.sender]) revert InvalideMultisigSigner(msg.sender);
+        if (!multiSigSigners[msg.sender]) revert InvalidMultisigSigner(msg.sender);
         _;
     }
 
@@ -121,14 +121,14 @@ contract VaultMultisigERC20 {
     /// @param _to The address of the recipient
     /// @param _amount The amount of tokens to transfer
     function initializeTransfer(address _to, uint256 _amount) external onlyMultiSigner {
-        if (_to == address(0)) revert InvalideReceipient();
+        if (_to == address(0)) revert InvalidReceipient();
         if (_amount == 0) revert InvalidAmount();
 
         uint256 transferId = transfersCount++;
         Transfer storage transfer = transfers[transferId];
         transfer.to = _to;
         transfer.amount = _amount;
-        transfer.approvals++;
+        transfer.approvals = 1;
         transfer.executed = false;
         transfer.approved[msg.sender] = true;
 
@@ -153,7 +153,7 @@ contract VaultMultisigERC20 {
     /// @dev The tokens MUST be on the contract
     function executeTransfer(uint256 transferId) external onlyMultiSigner {
         Transfer storage transfer = transfers[transferId];
-        if (transfer.approvals < quorum) revert QuaromNotReached(transferId);
+        if (transfer.approvals < quorum) revert QuorumNotReached(transferId);
         if (transfer.executed) revert TransferAlreadyExecuted(transferId);
 
         uint256 balance = token.balanceOf(address(this));
@@ -170,7 +170,6 @@ contract VaultMultisigERC20 {
     function getTransfer(uint256 transferId)
         external
         view
-        onlyMultiSigner
         returns (address to, uint256 amount, uint256 approvals, bool executed)
     {
         Transfer storage transfer = transfers[transferId];
@@ -180,7 +179,7 @@ contract VaultMultisigERC20 {
     /// @notice Check if a signer has approved a transfer
     /// @param transferId The ID of the transfer
     /// @param signer The address of the signer
-    function isApproved(uint256 transferId, address signer) external view onlyMultiSigner returns (bool) {
+    function hasSignedTransfer(uint256 transferId, address signer) external view returns (bool) {
         Transfer storage transfer = transfers[transferId];
         return transfer.approved[signer];
     }
