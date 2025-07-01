@@ -72,7 +72,6 @@ contract VaultMultisigTest is Test {
     }
 
     function test_updateSignersAndQuorum_Revert_QuorumLessThanOne() public {
-
         vm.expectRevert(VaultMultisig.QuorumLessThanOne.selector);
         vm.prank(account1);
         vaultContract.updateSignersAndQuorum(signers2, 0);
